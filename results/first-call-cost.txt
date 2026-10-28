@@ -1,0 +1,26 @@
+C:\Program Files\Python312\Lib\site-packages\torch\xpu\__init__.py:74: UserWarning: The detected GPU (Intel(R) Iris(R) Xe Graphics) is not officially supported by PyTorch XPU. Running workloads on this device may result in unexpected behavior.
+For stable and fully supported execution, please use GPUs based on Intel Arc (Alchemist) series or newer.
+Refer to the hardware prerequisites for more information: https://github.com/pytorch/pytorch/blob/main/docs/source/notes/get_start_xpu.rst#hardware-prerequisite (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\c10\xpu\XPUFunctions.cpp:134.)
+  return torch._C._xpu_getDeviceCount()
+torch 2.12.1+xpu | Intel(R) Iris(R) Xe Graphics
+
+first call vs steady state, 2048x2048 fp32 tensors
+          op   first call  best repeat
+         add        0.38s       2.29ms
+         mul        0.00s       2.14ms
+         sin        7.96s       1.49ms
+         exp       19.56s       1.52ms
+        tanh        3.57s       1.48ms
+         sum       41.48s       0.93ms
+Traceback (most recent call last):
+  File "C:\Users\Joe\Documents\deepseek-harness\default-workspace\torch-xpu-sanity-check\diagnostics\first_call_cost.py", line 89, in <module>
+    main()
+  File "C:\Users\Joe\Documents\deepseek-harness\default-workspace\torch-xpu-sanity-check\diagnostics\first_call_cost.py", line 60, in main
+    first = timed(name, fn)
+            ^^^^^^^^^^^^^^^
+  File "C:\Users\Joe\Documents\deepseek-harness\default-workspace\torch-xpu-sanity-check\diagnostics\first_call_cost.py", line 23, in timed
+    fn()
+  File "C:\Users\Joe\Documents\deepseek-harness\default-workspace\torch-xpu-sanity-check\diagnostics\first_call_cost.py", line 54, in <lambda>
+    "mean": lambda: a.mean(),
+                    ^^^^^^^^
+RuntimeError: level_zero backend failed with error: 2147483646 (UR_RESULT_ERROR_UNKNOWN)

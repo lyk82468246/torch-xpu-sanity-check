@@ -1,0 +1,24 @@
+C:\Program Files\Python312\Lib\site-packages\torch\xpu\__init__.py:74: UserWarning: The detected GPU (Intel(R) Iris(R) Xe Graphics) is not officially supported by PyTorch XPU. Running workloads on this device may result in unexpected behavior.
+For stable and fully supported execution, please use GPUs based on Intel Arc (Alchemist) series or newer.
+Refer to the hardware prerequisites for more information: https://github.com/pytorch/pytorch/blob/main/docs/source/notes/get_start_xpu.rst#hardware-prerequisite (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\c10\xpu\XPUFunctions.cpp:134.)
+  return torch._C._xpu_getDeviceCount()
+torch 2.12.1+xpu | Intel(R) Iris(R) Xe Graphics
+
+matmul relative error vs float64 CPU reference
+     dtype   size     rel_err   max_abs_err   ref_max
+   float32    256   2.859e-07        0.0000     66.37
+   float32    512   4.063e-07        0.0001    129.06
+   float32   1024   5.724e-07        0.0002    183.89
+   float16    256   3.595e-04        0.0345     74.39
+   float16    512   3.591e-04        0.0476    103.63
+   float16   1024   3.599e-04        0.0762    152.09
+  bfloat16    256   2.865e-03        0.2648     68.12
+  bfloat16    512   2.861e-03        0.3997    114.67
+  bfloat16   1024   2.878e-03        0.5841    172.12
+
+conv2d relative error vs float64 CPU reference
+    float32: rel_err=8.723e-08 max_abs=0.0000
+    float16: rel_err=8.253e-04 max_abs=0.0407
+
+nn.Linear relative error vs float64 CPU reference
+  fp32: rel_err=4.100e-07

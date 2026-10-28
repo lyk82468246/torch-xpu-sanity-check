@@ -1,0 +1,31 @@
+# Captured on the test machine with an earlier revision of diagnostics/indexing.py.
+# The index_put_ line failed because the test itself passed a badly shaped value
+# tensor (that bug is fixed in the script); every other line is a real device result.
+
+torch 2.12.1+xpu | Intel(R) Iris(R) Xe Graphics
+
+--- metadata / shape ops ---
+  OK   view                                  0.01s  (2, 2, 6) torch.float32
+  OK   reshape (copy)                        0.00s  (12, 2) torch.float32
+  OK   transpose                             0.00s  (6, 4) torch.float32
+  OK   permute                               0.00s  (6, 4) torch.float32
+  OK   contiguous                           30.90s  (6, 4) torch.float32
+  OK   cat                                  32.26s  (8, 6) torch.float32
+  OK   stack                                 0.00s  (2, 4, 6) torch.float32
+  OK   split                                 0.01s  (2, 6) torch.float32
+  OK   narrow / slice                        0.00s  (4, 2) torch.float32
+
+--- gather family ---
+  OK   index_select(dim=1)                 415.99s  (4, 2) torch.float32
+  OK   gather(dim=1)                        73.16s  (4, 2) torch.float32
+  OK   take                                  0.01s  (3,) torch.float32
+  OK   masked_select                        50.68s  (11,) torch.float32
+  FAIL index_put_                            0.02s  RuntimeError: shape mismatch: value tensor of shape [2] cannot be broadcast to indexing result of shape [2, 6]
+
+--- advanced indexing (this is the one that hung in the full run) ---
+  OK   x[idx] on 1-D, int64 idx              0.00s  (3,) torch.int64
+  OK   x[idx] on 2-D, int64 idx              0.53s  (2, 8) torch.float32
+
+--- scatter / where ---
+  OK   where                                28.80s  (8,) torch.float32
+  OK   scatter                               0.01s  (4, 4) torch.float32

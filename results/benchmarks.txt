@@ -1,0 +1,22 @@
+C:\Program Files\Python312\Lib\site-packages\torch\xpu\__init__.py:74: UserWarning: The detected GPU (Intel(R) Iris(R) Xe Graphics) is not officially supported by PyTorch XPU. Running workloads on this device may result in unexpected behavior.
+For stable and fully supported execution, please use GPUs based on Intel Arc (Alchemist) series or newer.
+Refer to the hardware prerequisites for more information: https://github.com/pytorch/pytorch/blob/main/docs/source/notes/get_start_xpu.rst#hardware-prerequisite (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\c10\xpu\XPUFunctions.cpp:134.)
+  return torch._C._xpu_getDeviceCount()
+torch 2.12.1+xpu | Intel(R) Iris(R) Xe Graphics
+
+fp32 matmul (TFLOPS = 2*n^3 / time)
+    size     XPU ms  XPU TFLOPS     CPU ms  CPU TFLOPS  speedup
+     512       0.31       0.856       1.57       0.171    5.01x
+    1024       1.69       1.270      13.04       0.165    7.72x
+    2048      16.09       1.068     123.20       0.139    7.66x
+    4096     200.29       0.686     896.98       0.153    4.48x
+
+elementwise fp32: (x*2+1).relu().sum()  [4 passes of m*m*4 bytes]
+    size     XPU ms  XPU GiB/s     CPU ms  CPU GiB/s  speedup
+    2048       4.37      14.30       6.24      10.01    1.43x
+    4096      17.83      14.02      28.37       8.81    1.59x
+    8192      82.87      12.07     127.78       7.83    1.54x
+
+host<->device copy bandwidth (256 MiB, pinned host buffer)
+  H2D:    25.9 ms  (  9.65 GiB/s)
+  D2H:    24.5 ms  ( 10.18 GiB/s)

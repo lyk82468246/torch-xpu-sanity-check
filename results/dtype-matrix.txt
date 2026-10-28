@@ -1,0 +1,51 @@
+C:\Program Files\Python312\Lib\site-packages\torch\xpu\__init__.py:74: UserWarning: The detected GPU (Intel(R) Iris(R) Xe Graphics) is not officially supported by PyTorch XPU. Running workloads on this device may result in unexpected behavior.
+For stable and fully supported execution, please use GPUs based on Intel Arc (Alchemist) series or newer.
+Refer to the hardware prerequisites for more information: https://github.com/pytorch/pytorch/blob/main/docs/source/notes/get_start_xpu.rst#hardware-prerequisite (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\c10\xpu\XPUFunctions.cpp:134.)
+  return torch._C._xpu_getDeviceCount()
+torch 2.12.1+xpu | Intel(R) Iris(R) Xe Graphics
+
+--- integer / bool arithmetic ---
+  OK   int8 add                                   -> (64, 64) torch.int8
+  OK   int16 add                                  -> (64, 64) torch.int16
+  OK   int32 add                                  -> (64, 64) torch.int32
+  OK   int64 add                                  -> (64, 64) torch.int64
+  OK   uint8 add                                  -> (64, 64) torch.uint8
+  OK   bool add                                   -> (64, 64) torch.bool
+  OK   int8 matmul                                -> (64, 64) torch.int8
+  FAIL int32 matmul                               RuntimeError: could not create a primitive descriptor for the matmul primitive. Run workload with environment vari
+  FAIL int64 matmul                               RuntimeError: Long is not supported in oneDNN!
+
+--- float16, tensors created directly on device ---
+  OK   mul                                        -> (256, 256) torch.float16
+  OK   add scalar                                 -> (256, 256) torch.float16
+  OK   relu                                       -> (256, 256) torch.float16
+  OK   exp                                        -> (256, 256) torch.float16
+  OK   sum                                        -> () torch.float16
+  OK   matmul 256^3                               -> (256, 256) torch.float16
+  OK   conv2d                                     -> (2, 8, 32, 32) torch.float16
+
+--- bfloat16, tensors created directly on device ---
+  OK   mul                                        -> (256, 256) torch.bfloat16
+  OK   add scalar                                 -> (256, 256) torch.bfloat16
+  OK   exp                                        -> (256, 256) torch.bfloat16
+  OK   sum                                        -> () torch.bfloat16
+  OK   matmul 256^3                               -> (256, 256) torch.bfloat16
+
+--- cross-dtype conversions (known to break on some iGPUs) ---
+  FAIL f32 -> f16 (.half)                         RuntimeError: level_zero backend failed with error: 45 (UR_RESULT_ERROR_INVALID_ARGUMENT)
+  FAIL f16 -> f32 (.float)                        RuntimeError: level_zero backend failed with error: 45 (UR_RESULT_ERROR_INVALID_ARGUMENT)
+  FAIL f32 -> bf16 (.bfloat16)                    RuntimeError: level_zero backend failed with error: 45 (UR_RESULT_ERROR_INVALID_ARGUMENT)
+  FAIL bf16 -> f32 (.float)                       RuntimeError: level_zero backend failed with error: 45 (UR_RESULT_ERROR_INVALID_ARGUMENT)
+  OK   f32 -> f32 (no-op .to)                     -> (256, 256) torch.float32
+  FAIL int32 -> int64 (.to)                       RuntimeError: level_zero backend failed with error: 45 (UR_RESULT_ERROR_INVALID_ARGUMENT)
+
+--- float64 ---
+  FAIL f64 create + matmul                        RuntimeError: Required aspect fp64 is not supported on the device
+
+--- fp32 matmul sizes ---
+  OK   matmul 256^3                               -> (256, 256) torch.float32
+  OK   matmul 512^3                               -> (512, 512) torch.float32
+  OK   matmul 1024^3                              -> (1024, 1024) torch.float32
+  OK   matmul 2048^3                              -> (2048, 2048) torch.float32
+  OK   matmul 4096^3                              -> (4096, 4096) torch.float32
+

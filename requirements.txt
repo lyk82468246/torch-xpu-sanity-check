@@ -1,0 +1,4 @@
+# PyTorch (XPU build) is installed from Intel's index, not from PyPI:
+#   python -m pip install --index-url https://download.pytorch.org/whl/xpu torch torchvision torchaudio
+# The scripts here only need torch itself; everything else is the standard library.
+torch>=2.5

@@ -1,0 +1,22 @@
+C:\Program Files\Python312\Lib\site-packages\torch\xpu\__init__.py:74: UserWarning: The detected GPU (Intel(R) Iris(R) Xe Graphics) is not officially supported by PyTorch XPU. Running workloads on this device may result in unexpected behavior.
+For stable and fully supported execution, please use GPUs based on Intel Arc (Alchemist) series or newer.
+Refer to the hardware prerequisites for more information: https://github.com/pytorch/pytorch/blob/main/docs/source/notes/get_start_xpu.rst#hardware-prerequisite (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\c10\xpu\XPUFunctions.cpp:134.)
+  return torch._C._xpu_getDeviceCount()
+torch 2.12.1+xpu | Intel(R) Iris(R) Xe Graphics
+
+--- on-device f32 -> f16 conversions (expected to fail on affected GPUs) ---
+  FAIL .half()                                        level_zero backend failed with error: 45 (UR_RESULT_ERROR_INVALID_ARGUMENT)
+  FAIL .to(torch.float16)                             level_zero backend failed with error: 45 (UR_RESULT_ERROR_INVALID_ARGUMENT)
+  FAIL empty_like(f16).copy_(x)                       level_zero backend failed with error: 45 (UR_RESULT_ERROR_INVALID_ARGUMENT)
+  FAIL aten._to_copy(x, dtype=f16)                    level_zero backend failed with error: 45 (UR_RESULT_ERROR_INVALID_ARGUMENT)
+  FAIL aten.copy(f16, x, non_blocking=True)           level_zero backend failed with error: 45 (UR_RESULT_ERROR_INVALID_ARGUMENT)
+
+--- CPU-side cast then upload (the workaround) ---
+  OK   cpu().half().to('xpu')                           10.78 ms  torch.float16
+  round-trip cost for 1024^2: 3.15 ms
+
+--- fp16 inference through the workaround ---
+  fp16 forward OK, relative error vs fp32 = 3.438e-04
+
+--- autocast depends on on-device casts (expected to fail) ---
+  FAIL autocast("xpu", bfloat16)                      level_zero backend failed with error: 45 (UR_RESULT_ERROR_INVALID_ARGUMENT)
