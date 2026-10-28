@@ -1,0 +1,72 @@
+
+########################################################################
+# stage: info  (isolated process)
+########################################################################
+========================================================================
+STAGE info
+torch 2.12.1+xpu | xpu build 20250302 | available=True | devices=1
+device : Intel(R) Iris(R) Xe Graphics
+driver : 1.6.34728 | platform Intel(R) oneAPI Unified Runtime over Level-Zero
+memory : 6.8 GiB | EUs 80 | subslices 10 | local mem 64 KiB
+flags  : fp16=True fp64=False atomic64=True dpas=False
+[ PASS ] create tensor on xpu  (2.9s)  -> sum=16.0
+[ PASS ] cpu -> xpu -> cpu round trip  (0.0s)  -> 28.0
+[ PASS ] explicit .xpu() / .to('xpu:0')  (0.0s)  -> xpu:0, xpu:0
+[ PASS ] pinned-memory async copy  (0.0s)  -> pinned async copy ok, sum=0.0
+[ PASS ] dtype creation coverage  (0.0s)  -> float32=torch.float32, float16=torch.float16, bfloat16=torch.bfloat16, int8=torch.int8, int64=torch.int64, bool=torch.bool
+========================================================================
+RESULT: 5/5 checks passed in 3s
+
+########################################################################
+# stage: elem  (isolated process)
+########################################################################
+========================================================================
+STAGE elem
+[ PASS ] elementwise math 2048^2  (257.5s)  -> mean=0.0012 finite=True
+[ PASS ] reductions 2M elements  (180.8s)  -> sum=-2174.64 mean=-0.0010 max=4.821 std=1.0002 argmax=305980
+[ PASS ] sort / topk  (70.5s)  -> max=3.1621
+[ PASS ] view / reshape / transpose / permute  (0.0s)  -> torch.Size([2, 2, 6])
+[ PASS ] cat / stack / split  (30.2s)  -> torch.Size([6, 2])
+========================================================================
+RESULT: 5/5 checks passed in 539s
+
+########################################################################
+# stage: matmul  (isolated process)
+########################################################################
+========================================================================
+STAGE matmul
+[ PASS ] matmul fp32 256^3  (86.0s)  -> 256^3 ok, finite
+[ PASS ] matmul fp32 512^3  (0.3s)  -> 512^3 ok, finite
+[ PASS ] matmul fp32 1024^3  (0.0s)  -> 1024^3 ok, finite
+[ PASS ] matmul fp32 2048^3  (0.2s)  -> 2048^3 ok, finite
+[ PASS ] numerical correctness fp32 vs CPU  (0.0s)  -> fp32 max|err| vs CPU = 0.00e+00
+========================================================================
+RESULT: 5/5 checks passed in 86s
+
+########################################################################
+# stage: nn  (isolated process)
+########################################################################
+========================================================================
+STAGE nn
+[ PASS ] conv2d (7x7 stride 2)  (1.2s)  -> out=(4, 32, 64, 64) finite=True
+[ PASS ] batchnorm / relu / maxpool  (17.0s)  -> batchnorm+relu+maxpool -> (8, 16, 28, 28)
+[ PASS ] baddbmm / SDPA / LayerNorm  (9.5s)  -> baddbmm (8, 128, 64), sdpa (2, 4, 128, 64), layernorm (8, 128, 256)
+[ PASS ] autograd + SGD step  (59.7s)  -> loss=1.3267 |dW|max=2.35e-04
+[ PASS ] mini CNN training loop  (142.8s)  -> loss 2.342 -> 2.293 over 5 steps
+========================================================================
+RESULT: 5/5 checks passed in 230s
+
+########################################################################
+# stage: mem  (isolated process)
+########################################################################
+========================================================================
+STAGE mem
+[ PASS ] 256 MiB allocation + fill + free  (0.1s)  -> 256 MiB fill ok (value=1.0), allocated=256 MiB, peak=256 MiB, after free=0 MiB
+[ PASS ] XPU streams  (25.0s)  -> Stream create / use / synchronize ok
+[ PASS ] RNG reproducibility  (0.0s)  -> same seed -> identical values
+[ PASS ] synchronize / empty_cache  (0.0s)  -> ok
+========================================================================
+RESULT: 4/4 checks passed in 25s
+
+========================================================================
+STAGE SUMMARY: 5/5 stages fully passed

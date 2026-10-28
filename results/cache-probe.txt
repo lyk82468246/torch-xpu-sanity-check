@@ -1,0 +1,18 @@
+### A. WITH NEO_CACHE_DIR (existing but empty dir) -- each op runs in its own process, twice
+NEO_CACHE_DIR = C:\Users\Joe\Documents\deepseek-harness\default-workspace\neo_artifact_cache
+
+        op       run1       run2
+      sort     59.91s      0.28s
+           first->second: 217x faster
+   softmax      9.51s      0.07s
+           first->second: 145x faster
+ layernorm      6.03s      0.05s
+           first->second: 118x faster
+cache files after A: 5 files, 20.5 MB
+
+### B. CONTROL: no NEO_CACHE_DIR -- same op twice (rules out the OS page cache as the explanation)
+NEO_CACHE_DIR = (unset -- every run will be cold)
+
+        op       run1       run2
+      sort     68.55s     73.75s
+           first->second: 1x faster

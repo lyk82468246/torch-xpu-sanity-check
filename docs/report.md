@@ -6,12 +6,57 @@
 
 ## 结论
 
-**torch + XPU 基本可用，但该机是"官方不支持"的 Iris Xe 核显，存在两个硬伤：设备上跨 dtype 转换必崩、首次调用 JIT 编译极慢（单算子几十秒到几分钟，且不跨进程复用）。**
+**torch + XPU 可用，但该机是"官方不支持"的 Iris Xe 核显。两个硬伤里，编译慢那一半已经解决：设置 `NEO_CACHE_DIR` 即可全局持久化编译缓存，整套检查从 883 s 降到 30 s，并且顺带消除了"设备丢失"——剩下的硬伤只有设备上跨 dtype 转换必崩。**
 
 - fp32 路径功能完整、数值正确，稳态下比同机 CPU 快约 5 倍 → 可用于验证、小规模实验。
 - fp16/bf16 计算本身正常且精度合理，但只要在设备上做 `.half()` / `.bfloat16()` / autocast 就报错 → 必须先在 CPU 侧转 dtype 再上传。
 - 无 fp64 硬件支持；int32/int64 矩阵乘走不通。
+- 编译缓存默认关闭，每个新进程都要重付几十秒到几分钟；开启 `NEO_CACHE_DIR` 后是毫秒级。
 - 因为是核显（共享内存、无 systolic 矩阵单元），不适合正式训练。
+
+## 持久化 JIT 缓存（收益最大的一处优化）
+
+上面那些几十秒到几分钟的编译耗时，其实是"每次进程都重来一遍"造成的浪费。**驱动的编译缓存默认没开**，把目录告诉它之后，第二次启动就是秒级。
+
+线索来自 Level Zero 驱动二进制 `ze_intel_gpu64.dll`，里面只有三个缓存相关的环境变量：`NEO_CACHE_DIR`、`NEO_CACHE_MAX_SIZE`、`NEO_CACHE_PERSISTENT`。实测只有目录是决定性的，而且**目录必须预先存在**（驱动不会自己创建）。每次都是全新进程、同一台机器：
+
+| 算子（2048² fp32） | 冷进程 | 热进程 | 加速 |
+|---|---|---|---|
+| sort | 59.9 s | **0.28 s** | 217× |
+| softmax | 9.5 s | **0.07 s** | 145× |
+| layernorm | 6.0 s | **0.05 s** | 118× |
+| Linear + backward | 162.7 s | **1.13 s** | 144× |
+| 整套套件（24 项检查） | 883 s | **30 s** | 29× |
+| *对照*：不设缓存目录跑 sort | 68.6 s | 73.8 s | 无（每次重编译） |
+
+最后那行对照很关键：不设缓存目录时连续两个进程都很慢，所以提速确实来自驱动的模块缓存，而不是操作系统页缓存。少数算子（exp、sum、matmul）在机器上编译过一次之后即使冷进程也很快，所以收益主要体现在 JIT 重的算子上。
+
+各种配置的实际效果：
+
+| 配置 | 结果 |
+|---|---|
+| 什么都不设 | 每个进程都重编译，sort 永远是 60–74 s |
+| 只设 `NEO_CACHE_PERSISTENT=1` | **无效**，默认目录不会被写入，也没有提速 |
+| 只设 `NEO_CACHE_DIR=<已存在且可写的目录>` | **有效**，驱动写入 `*.l0_cache`（上面三个算子 20 MB，整套套件 180 MB） |
+| `NEO_CACHE_DIR` 指向不存在的目录 | **静默失效**——不写文件也不提速，必须先建目录 |
+| `NEO_CACHE_DIR` + `NEO_CACHE_MAX_SIZE=<字节>` | 同上，但带容量上限 |
+| 只设 `SYCL_CACHE_PERSISTENT=1` + `SYCL_CACHE_DIR=…`（本机原本就设了） | 对 PyTorch XPU **没用**：SYCL 的 inline cache 这条路被绕开，而且那个目录属管理员所有、当前用户写不进去 |
+
+全局开启（新进程生效）：
+
+```powershell
+.\scripts\enable_jit_cache.ps1          # 默认 %LOCALAPPDATA%\torch_xpu_cache，上限 4 GiB
+.\scripts\enable_jit_cache.ps1 -Disable
+```
+
+或手工执行：
+
+```powershell
+setx NEO_CACHE_DIR "C:\Users\<你>\AppData\Local\torch_xpu_cache"
+setx NEO_CACHE_MAX_SIZE 4294967296
+```
+
+注意：开启后的**第一次运行仍然是冷的**（也可能仍然丢设备），之后才快；缓存键包含驱动和硬件信息，升级驱动后会重新变冷；`NEO_CACHE_MAX_SIZE` 满了会淘汰旧条目；这个缓存**不能**修复 dtype 转换报错（那是内核级错误，不是编译问题）。
 
 ## 稳定性：同一个检查，时好时坏
 
@@ -19,13 +64,15 @@
 
 | 运行方式 | 结果 |
 |---|---|
-| `run_checks.py`（按 stage 分进程，`results/functional-checks.txt`） | info 5/5、elem 5/5、matmul 5/5、**nn 0/5**（`conv2d` 编译 207 s 后 `UR_RESULT_ERROR_DEVICE_LOST`）、**mem 1/4**（建 `Stream` 215 s 后设备丢失） |
+| `run_checks.py`，**无内核缓存**（`results/functional-checks.txt`） | info 5/5、elem 5/5、matmul 5/5、**nn 0/5**（`conv2d` 编译 207 s 后 `UR_RESULT_ERROR_DEVICE_LOST`）、**mem 1/4**（建 `Stream` 215 s 后设备丢失） |
+| `run_checks.py`，缓存已开启但为空（`results/persistent-cache-cold.txt`） | **5/5 阶段、24/24 检查，883 s** |
+| `run_checks.py`，缓存已热（`results/persistent-cache-warm.txt`） | **5/5 阶段、24/24 检查，30 s** |
 | 同批检查分 stage 单独跑（其它几次尝试） | `conv2d` 153 s 后通过、`Stream` 204 s 后通过、mini CNN 训练 5 步收敛 |
-| 早期版本一次性跑（单进程） | `index` 内核卡 451 s → `UR_RESULT_ERROR_UNKNOWN` → 设备丢失，25 项里只过 8 项 |
+| 早期版本一次性跑（单进程、无缓存） | `index` 内核卡 451 s → `UR_RESULT_ERROR_UNKNOWN` → 设备丢失，25 项里只过 8 项 |
 
-设备一旦丢失，进程内后续所有调用都会失败，所以套件默认按 stage 分进程执行，记录下来的日志也会在某一阶段中断。
+设备一旦丢失，进程内后续所有调用都会失败，所以套件默认按 stage 分进程执行。
 
-结论：**能跑通的时候结果是对的，但这台机器上的 XPU 不能稳定复现**——面向生产的代码必须把"编译超时/设备丢失"当成正常故障处理（超时、重试、退回 CPU）。
+**关键结论：丢设备是"编译超时"造成的，不是算子本身的问题。** 开启持久化编译缓存后，没有一个内核需要几百秒编译，整套检查从不稳定变成 30 秒全绿。也就是说，前面那节提到的持久化缓存不只是加速，它同时是这个环境可用性的前提。
 
 ## 环境
 
