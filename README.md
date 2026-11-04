@@ -7,6 +7,7 @@ The point of this repo is not to benchmark hardware — it is to answer "does `t
 - [What it checks](#what-it-checks)
 - [Quickstart](#quickstart)
 - [Findings from the reference machine](#findings-from-the-reference-machine)
+- [AVX-512 CPU vs XPU: where each one wins](#avx-512-cpu-vs-xpu-where-each-one-wins)
 - [Known limitations on unsupported iGPUs](#known-limitations-on-unsupported-igpus)
 - [Recorded results](#recorded-results)
 - [中文说明](docs/report.md)
@@ -17,6 +18,9 @@ The point of this repo is not to benchmark hardware — it is to answer "does `t
 |---|---|
 | `run_checks.py` | Staged functional suite: device info, elementwise + reductions + shape ops, matmul, NN (conv/BN/attention/autograd/training), memory & streams. Every check is timed, and failures never abort the run. **Each stage runs in its own process by default**, because one wedged kernel can leave the XPU context unusable. |
 | `benchmarks/bench_matmul.py` | Steady-state throughput: fp32 matmul TFLOPS, elementwise bandwidth, H2D/D2H copy bandwidth, XPU vs CPU on the same machine. Warm-up iterations are discarded so JIT compilation never pollutes the numbers. |
+| `benchmarks/bench_cpu_vs_xpu.py` | Same-shape CPU vs XPU matrix (GEMM, conv, norm, attention, training step, transfers). Run it a second time with `ONEDNN_MAX_CPU_ISA=AVX2` to quantify what AVX-512 buys. |
+| `benchmarks/bench_coop.py` | Three CPU+XPU cooperation patterns — pipelining, splitting one GEMM, double-buffered copies — and whether each one actually pays. |
+| `benchmarks/bench_dispatch.py` | Per-operator dispatch cost, CPU thread scaling, tiny-batch inference, and the workloads the XPU cannot run at all. |
 | `diagnostics/dtype_matrix.py` | Which dtypes and operators actually work (fp32, fp16, bf16, int8/16/32/64, bool, cross-dtype casts, fp64). Supports running one section per process. |
 | `diagnostics/numerics.py` | Accuracy of matmul / conv2d / Linear against a float64 CPU reference. |
 | `diagnostics/cast_workaround.py` | Reproduces the on-device cast failure and demonstrates the CPU-side-cast workaround for fp16/bf16 inference. |
@@ -35,6 +39,9 @@ python run_checks.py                     # all stages, one process per stage
 python run_checks.py nn                  # a single stage: info | elem | matmul | nn | mem
 python run_checks.py --no-isolate        # everything in one process (faster, but a bad kernel poisons the rest)
 python benchmarks/bench_matmul.py
+python benchmarks/bench_cpu_vs_xpu.py
+python benchmarks/bench_coop.py
+python benchmarks/bench_dispatch.py
 python diagnostics/dtype_matrix.py
 python diagnostics/numerics.py
 python diagnostics/cast_workaround.py
@@ -73,7 +80,7 @@ Accuracy is healthy:
 | bfloat16 | 2.9e-3 |
 | fp16 conv2d | 8.3e-4 |
 
-Steady-state throughput (same machine, CPU = 4-core Tiger Lake):
+Steady-state throughput (same machine, CPU = 4-core Tiger Lake, 4 threads):
 
 | workload | XPU | CPU | speedup |
 |---|---|---|---|
@@ -83,6 +90,67 @@ Steady-state throughput (same machine, CPU = 4-core Tiger Lake):
 | fp32 matmul 4096³ | 0.69 TFLOPS | 0.15 TFLOPS | 4.5× |
 | elementwise `(x*2+1).relu().sum()`, 4096² | 14.0 GiB/s | 8.8 GiB/s | 1.6× |
 | H2D / D2H copy | 9.7 / 10.2 GiB/s | — | — |
+
+> Single-shot values from one session; sustained numbers on this 15 W part drift 20–30 % with thermal state. The [CPU vs XPU section](#avx-512-cpu-vs-xpu-where-each-one-wins) below uses a stricter protocol (best-of-N, alternating runs) and is the one to use for decisions.
+
+## AVX-512 CPU vs XPU: where each one wins
+
+The CPU here is an **i5-1135G7** (Tiger Lake, 4C/8T) with AVX-512 — torch reports `CPU capability usage: AVX512`, oneDNN 3.11.2 + MKL. Full tables: [`results/cpu-vs-xpu.md`](results/cpu-vs-xpu.md); reproduce with `benchmarks/bench_cpu_vs_xpu.py`. All numbers are steady state (kernels compiled, warmup discarded).
+
+| workload | CPU AVX-512 | XPU | winner |
+|---|---|---|---|
+| matmul 128³ | 0.028 ms | 0.498 ms | **CPU 18×** |
+| matmul 256³ | 0.085 ms | 0.514 ms | **CPU 6.1×** |
+| matmul 512³ | 1.16 ms | 0.72 ms | XPU 1.6× |
+| matmul 1024³ | 9.9 ms | 2.03 ms | **XPU 4.9×** |
+| matmul 2048³ | 67 ms | 17.6 ms | **XPU 3.8×** |
+| matmul 4096³ | 577 ms | 205 ms | **XPU 2.8×** |
+| conv2d 3×224×224→64×7×7 | 1.70 ms | 0.74 ms | XPU 2.3× |
+| conv2d 8×64×56×56 | 7.20 ms | 3.36 ms | XPU 2.1× |
+| layernorm (32,128,768) | 3.16 ms | 1.40 ms | XPU 2.3× |
+| softmax (32,128,768) | 1.86 ms | 1.34 ms | XPU 1.4× |
+| sdpa (8,8,256,64) | 9.57 ms | 5.95 ms | XPU 1.6× |
+| MLP 768×2 fwd+bwd+Adam, b=128 | 8.35 ms | 6.20 ms | XPU 1.35× |
+| elementwise 4096² | 26.0 ms | 20.0 ms | XPU 1.3× |
+| elementwise 1024² | 0.81 ms | 0.92 ms | CPU 1.13× |
+| sum over 16M floats | 1.90 ms | 3.77 ms | **CPU 2.0×** |
+| tiny MLP (128 wide), batch 1–64 | 0.07–0.09 ms | 0.40 ms | **CPU 4–6×** |
+| add 16×16 | 0.010 ms | 0.59 ms | **CPU 58×** |
+
+**AVX-512 itself is not the lever on this machine.** Three alternating A/B rounds (wide ISA vs `ONEDNN_MAX_CPU_ISA=AVX2` + `MKL_ENABLE_INSTRUCTIONS=AVX2`), medians:
+
+| workload | AVX-512 | AVX2 | ratio |
+|---|---|---|---|
+| matmul 1024³ | 6.31 ms | 5.79 ms | 0.92× |
+| matmul 2048³ | 83.8 ms | 88.1 ms | 1.05× |
+| matmul 4096³ | 787 ms | 830 ms | 1.05× |
+| conv2d 8×64×56×56 | 9.24 ms | 9.38 ms | 1.01× |
+| layernorm | 2.96 ms | 2.77 ms | 0.94× |
+| softmax | 1.51 ms | 1.96 ms | 1.30× |
+
+Best case ~1.3–1.4×, most rows indistinguishable — smaller than the 20–30 % thermal drift of a 15 W part. The binding constraints are the power budget and the shared DDR bandwidth, not SIMD width.
+
+**Why small work belongs on the CPU:** a synchronised XPU operator costs **0.47 ms** of fixed latency (0.018 ms if you only queue it), while the CPU runs a tiny op in 0.01 ms. Anything below roughly a 512³-equivalent GEMM loses to dispatch.
+
+**When they cooperate** (measured, `benchmarks/bench_coop.py`):
+
+| pattern | result |
+|---|---|
+| pipeline: XPU GEMMs while the CPU does its own GEMMs | 251 ms → **197 ms (+21 %)** — the XPU queue is async, so independent CPU work is nearly free |
+| one GEMM split 85 % XPU / 15 % CPU | 2048³: 16.6 ms → **27.4 ms (−65 %)**; 4096³: 205 ms → **255 ms (−24 %)** — both engines fight for the same DDR bandwidth |
+| double-buffered copy/compute overlap | 86.5 ms → 87.2 ms (−1 %) — copies and bandwidth-bound compute share one path |
+
+**Decision table**
+
+| situation | use | why |
+|---|---|---|
+| GEMM ≥ 512³, conv, layernorm/softmax/SDPA at real batch sizes | **XPU** | 1.4–4.9× faster once kernels are cached |
+| GEMM ≤ 256³, tiny models, batch ≤ 256 inference, per-op synchronisation | **CPU (AVX-512)** | XPU pays ~0.5 ms per synchronised op |
+| reductions and light elementwise on small/medium tensors | **CPU** | shared bandwidth + dispatch; CPU wins 1.1–2× |
+| fp64, int32/int64 matmul, any dtype cast | **CPU** | XPU has no kernel (or raises error 45) |
+| preprocessing / augmentation feeding XPU compute | **both, pipelined** | +21 % measured, more if the CPU stage is larger |
+| splitting the *same* GEMM across both engines | **don't** | −65 % / −24 %; they contend for the same memory |
+| data must round-trip and compute is < ~13 ms | **CPU** | 64 MiB costs 6.4 ms each way |
 
 ## Persistent kernel cache: 20 s → 0.1 s
 
@@ -159,6 +227,8 @@ These reproduce on the reference machine. Whether they also affect Arc / officia
 | `results/persistent-cache-cold.txt` | `run_checks.py` with `NEO_CACHE_DIR` set, cache empty |
 | `results/persistent-cache-warm.txt` | `run_checks.py` again, same cache dir |
 | `results/cache-probe.txt` | `diagnostics/cache_probe.py`, with and without `NEO_CACHE_DIR` |
+| `results/cpu-vs-xpu.md` | CPU (AVX-512) vs XPU: per-workload table, AVX-512/AVX2 A/B, cooperation, decision table |
+| `results/cpu-vs-xpu-data.json` | Raw JSON behind the tables above (both ISA runs, cooperation, dispatch) |
 
 ## Practical advice
 
